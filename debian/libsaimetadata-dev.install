@@ -8,5 +8,6 @@ meta/PortRelatedSet.h usr/include/sai
 meta/Notification*.h usr/include/sai
 meta/Globals.h usr/include/sai
 SAI/meta/sai*.h usr/include/sai
+SAI/experimental/sai*.h usr/include/sai/experimental
 usr/lib/*/libsaimetadata.so
 usr/lib/*/libsaimeta.so
