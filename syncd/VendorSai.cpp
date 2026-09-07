@@ -764,6 +764,10 @@ sai_status_t VendorSai::bulkGet(
             ptr = m_apis.port_api->get_ports_attribute;
             break;
 
+        case SAI_OBJECT_TYPE_QUEUE:
+            ptr = m_apis.queue_api->get_queues_attribute;
+            break;
+
         default:
             SWSS_LOG_ERROR("not implemented %s, FIXME", sai_serialize_object_type(object_type).c_str());
             return SAI_STATUS_NOT_IMPLEMENTED;
