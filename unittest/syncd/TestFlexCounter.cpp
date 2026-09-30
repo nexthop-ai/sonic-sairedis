@@ -2954,6 +2954,111 @@ TEST(FlexCounter, dynamicCounterGroupsBulkPath)
     ASSERT_TRUE(keys.empty());
 }
 
+TEST(FlexCounter, bulkPathSkipsObjectsWithNoSupportedCounters)
+{
+    ScopedPerPortCounterDiscovery enablePerPortCounterDiscovery(true);
+
+    // A first batch creates a counter group; a second batch whose objects
+    // support none of the counters (e.g. TH6 multicast queues for WRED stats)
+    // must be skipped, not polled with the first batch's group.
+
+    std::vector<std::string> counterNames = {
+        "SAI_QUEUE_STAT_WRED_DROPPED_PACKETS",
+        "SAI_QUEUE_STAT_WRED_ECN_MARKED_PACKETS",
+        "SAI_QUEUE_STAT_WRED_ECN_MARKED_BYTES"
+    };
+
+    test_syncd::mockVidManagerObjectTypeQuery(SAI_OBJECT_TYPE_QUEUE);
+    auto oids = generateOids(4, SAI_OBJECT_TYPE_QUEUE);
+    ASSERT_EQ(oids.size(), 4u);
+    std::vector<sai_object_id_t> supportedQueues = {oids[0], oids[1]};
+    std::vector<sai_object_id_t> unsupportedQueues = {oids[2], oids[3]};
+
+    auto isSupported = [&](sai_object_id_t rid) -> bool {
+        return rid == oids[0] || rid == oids[1];
+    };
+
+    sai->mock_getStats = [&](sai_object_type_t, sai_object_id_t rid,
+                             uint32_t count, const sai_stat_id_t *,
+                             uint64_t *counters) -> sai_status_t
+    {
+        if (!isSupported(rid))
+            return SAI_STATUS_NOT_SUPPORTED;
+        for (uint32_t i = 0; i < count; i++)
+            counters[i] = 100;
+        return SAI_STATUS_SUCCESS;
+    };
+
+    sai->mock_getStatsExt = [&](sai_object_type_t, sai_object_id_t rid,
+                                uint32_t count, const sai_stat_id_t *,
+                                sai_stats_mode_t, uint64_t *counters) -> sai_status_t
+    {
+        if (!isSupported(rid))
+            return SAI_STATUS_NOT_SUPPORTED;
+        for (uint32_t i = 0; i < count; i++)
+            counters[i] = 100;
+        return SAI_STATUS_SUCCESS;
+    };
+
+    // No capability query, so bulk is unsupported and every object takes the
+    // single-object fallback that confirms each object's counter group.
+    sai->mock_queryStatsCapability = [](sai_object_id_t, sai_object_type_t,
+                                        sai_stat_capability_list_t *)
+    {
+        return SAI_STATUS_FAILURE;
+    };
+
+    sai->mock_bulkGetStats = [](sai_object_id_t, sai_object_type_t, uint32_t,
+                                const sai_object_key_t *, uint32_t,
+                                const sai_stat_id_t *, sai_stats_mode_t,
+                                sai_status_t *, uint64_t *)
+    {
+        return SAI_STATUS_NOT_SUPPORTED;
+    };
+
+    FlexCounter fc("test", sai, "COUNTERS_DB");
+
+    std::vector<swss::FieldValueTuple> pluginValues;
+    pluginValues.emplace_back(POLL_INTERVAL_FIELD, "1000");
+    pluginValues.emplace_back(FLEX_COUNTER_STATUS_FIELD, "enable");
+    pluginValues.emplace_back(STATS_MODE_FIELD, STATS_MODE_READ);
+    fc.addCounterPlugin(pluginValues);
+
+    std::vector<swss::FieldValueTuple> counterValues;
+    counterValues.emplace_back(QUEUE_COUNTER_ID_LIST, join(counterNames));
+
+    fc.bulkAddCounter(SAI_OBJECT_TYPE_QUEUE, supportedQueues, supportedQueues, counterValues);
+    EXPECT_NO_THROW(fc.bulkAddCounter(SAI_OBJECT_TYPE_QUEUE, unsupportedQueues, unsupportedQueues, counterValues));
+
+    swss::DBConnector db("COUNTERS_DB", 0);
+    swss::RedisPipeline pipeline(&db);
+    swss::Table countersTable(&pipeline, COUNTERS_TABLE, false);
+
+    waitForCounterKeys(countersTable, supportedQueues.size());
+
+    for (auto oid : supportedQueues)
+    {
+        waitForCounterValues(countersTable, toOid(oid),
+                             {"SAI_QUEUE_STAT_WRED_ECN_MARKED_PACKETS"}, {"100"});
+    }
+
+    std::vector<std::string> keys;
+    countersTable.getKeys(keys);
+    removeTimeStamp(keys, countersTable);
+    for (auto oid : unsupportedQueues)
+    {
+        EXPECT_EQ(std::find(keys.begin(), keys.end(), toOid(oid)), keys.end())
+            << "Queue " << toOid(oid) << " has no supported counters and must not be polled";
+    }
+
+    for (auto oid : oids)
+    {
+        fc.removeCounter(oid);
+        countersTable.del(toOid(oid));
+    }
+    EXPECT_TRUE(fc.isEmpty());
+}
+
 TEST(FlexCounter, failedPollsCountAndCleanUp)
 {
     // This test verifies that:
