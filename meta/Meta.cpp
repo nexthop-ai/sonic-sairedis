@@ -1911,6 +1911,7 @@ void Meta::meta_generic_validation_post_remove(
         switch (md.attrvaluetype)
         {
             case SAI_ATTR_VALUE_TYPE_BOOL:
+            case SAI_ATTR_VALUE_TYPE_LATCH_STATUS:
             case SAI_ATTR_VALUE_TYPE_CHARDATA:
             case SAI_ATTR_VALUE_TYPE_UINT8:
             case SAI_ATTR_VALUE_TYPE_INT8:
@@ -2040,6 +2041,7 @@ void Meta::meta_generic_validation_post_remove(
             case SAI_ATTR_VALUE_TYPE_PORT_LANE_LATCH_STATUS_LIST:
             case SAI_ATTR_VALUE_TYPE_PORT_ILT_LANE_TRAINING_STATUS_LIST:
             case SAI_ATTR_VALUE_TYPE_PORT_SNR_LIST:
+            case SAI_ATTR_VALUE_TYPE_PORT_PAM4_EYE_VALUES_LIST:
             case SAI_ATTR_VALUE_TYPE_TAPS_LIST:
                 // no special action required
                 break;
@@ -3556,6 +3558,7 @@ sai_status_t Meta::meta_generic_validation_create(
                 }
 
             case SAI_ATTR_VALUE_TYPE_BOOL:
+            case SAI_ATTR_VALUE_TYPE_LATCH_STATUS:
             case SAI_ATTR_VALUE_TYPE_UINT8:
             case SAI_ATTR_VALUE_TYPE_INT8:
             case SAI_ATTR_VALUE_TYPE_UINT16:
@@ -3842,6 +3845,10 @@ sai_status_t Meta::meta_generic_validation_create(
 
             case SAI_ATTR_VALUE_TYPE_PORT_SNR_LIST:
                 VALIDATION_LIST(md, value.portsnrlist);
+                break;
+
+            case SAI_ATTR_VALUE_TYPE_PORT_PAM4_EYE_VALUES_LIST:
+                VALIDATION_LIST(md, value.portpam4eyevalues);
                 break;
 
             case SAI_ATTR_VALUE_TYPE_TAPS_LIST:
@@ -4193,6 +4200,7 @@ sai_status_t Meta::meta_generic_validation_set(
     switch (md.attrvaluetype)
     {
         case SAI_ATTR_VALUE_TYPE_BOOL:
+        case SAI_ATTR_VALUE_TYPE_LATCH_STATUS:
         case SAI_ATTR_VALUE_TYPE_UINT8:
         case SAI_ATTR_VALUE_TYPE_INT8:
         case SAI_ATTR_VALUE_TYPE_UINT16:
@@ -4506,6 +4514,10 @@ sai_status_t Meta::meta_generic_validation_set(
             VALIDATION_LIST(md, value.portsnrlist);
             break;
 
+        case SAI_ATTR_VALUE_TYPE_PORT_PAM4_EYE_VALUES_LIST:
+            VALIDATION_LIST(md, value.portpam4eyevalues);
+            break;
+
         case SAI_ATTR_VALUE_TYPE_TAPS_LIST:
             VALIDATION_LIST(md, value.portserdestaps);
             break;
@@ -4740,6 +4752,7 @@ sai_status_t Meta::meta_generic_validation_get(
         switch (md.attrvaluetype)
         {
             case SAI_ATTR_VALUE_TYPE_BOOL:
+            case SAI_ATTR_VALUE_TYPE_LATCH_STATUS:
             case SAI_ATTR_VALUE_TYPE_CHARDATA:
             case SAI_ATTR_VALUE_TYPE_UINT8:
             case SAI_ATTR_VALUE_TYPE_INT8:
@@ -4922,6 +4935,10 @@ sai_status_t Meta::meta_generic_validation_get(
                 VALIDATION_LIST(md, value.portsnrlist);
                 break;
 
+            case SAI_ATTR_VALUE_TYPE_PORT_PAM4_EYE_VALUES_LIST:
+                VALIDATION_LIST(md, value.portpam4eyevalues);
+                break;
+
             case SAI_ATTR_VALUE_TYPE_TAPS_LIST:
                 VALIDATION_LIST(md, value.portserdestaps);
                 break;
@@ -5014,6 +5031,7 @@ void Meta::meta_generic_validation_post_get(
         switch (md.attrvaluetype)
         {
             case SAI_ATTR_VALUE_TYPE_BOOL:
+            case SAI_ATTR_VALUE_TYPE_LATCH_STATUS:
             case SAI_ATTR_VALUE_TYPE_CHARDATA:
             case SAI_ATTR_VALUE_TYPE_UINT8:
             case SAI_ATTR_VALUE_TYPE_INT8:
@@ -5247,6 +5265,10 @@ void Meta::meta_generic_validation_post_get(
 
             case SAI_ATTR_VALUE_TYPE_PORT_SNR_LIST:
                 VALIDATION_LIST_GET(md, value.portsnrlist);
+                break;
+
+            case SAI_ATTR_VALUE_TYPE_PORT_PAM4_EYE_VALUES_LIST:
+                VALIDATION_LIST_GET(md, value.portpam4eyevalues);
                 break;
 
             case SAI_ATTR_VALUE_TYPE_TAPS_LIST:
@@ -6026,6 +6048,7 @@ void Meta::meta_generic_validation_post_create(
         switch (md.attrvaluetype)
         {
             case SAI_ATTR_VALUE_TYPE_BOOL:
+            case SAI_ATTR_VALUE_TYPE_LATCH_STATUS:
             case SAI_ATTR_VALUE_TYPE_CHARDATA:
             case SAI_ATTR_VALUE_TYPE_UINT8:
             case SAI_ATTR_VALUE_TYPE_INT8:
@@ -6157,6 +6180,13 @@ void Meta::meta_generic_validation_post_create(
                 // no special action required
                 break;
 
+            case SAI_ATTR_VALUE_TYPE_PORT_LANE_LATCH_STATUS_LIST:
+            case SAI_ATTR_VALUE_TYPE_PORT_SNR_LIST:
+            case SAI_ATTR_VALUE_TYPE_PORT_PAM4_EYE_VALUES_LIST:
+            case SAI_ATTR_VALUE_TYPE_TAPS_LIST:
+                // no special action required
+                break;
+
             default:
 
                 META_LOG_THROW(md, "serialization type is not supported yet FIXME");
@@ -6219,6 +6249,7 @@ void Meta::meta_generic_validation_post_set(
     switch (md.attrvaluetype)
     {
         case SAI_ATTR_VALUE_TYPE_BOOL:
+        case SAI_ATTR_VALUE_TYPE_LATCH_STATUS:
         case SAI_ATTR_VALUE_TYPE_CHARDATA:
         case SAI_ATTR_VALUE_TYPE_UINT8:
         case SAI_ATTR_VALUE_TYPE_INT8:
@@ -6406,6 +6437,13 @@ void Meta::meta_generic_validation_post_set(
             break;
 
         case SAI_ATTR_VALUE_TYPE_IP_PREFIX_LIST:
+            // no special action required
+            break;
+
+        case SAI_ATTR_VALUE_TYPE_PORT_LANE_LATCH_STATUS_LIST:
+        case SAI_ATTR_VALUE_TYPE_PORT_SNR_LIST:
+        case SAI_ATTR_VALUE_TYPE_PORT_PAM4_EYE_VALUES_LIST:
+        case SAI_ATTR_VALUE_TYPE_TAPS_LIST:
             // no special action required
             break;
 
