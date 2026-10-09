@@ -163,6 +163,13 @@ sai_status_t SwitchStateBase::create(
         return createHostif(object_id, switch_id, attr_count, attr_list);
     }
 
+    if (object_type == SAI_OBJECT_TYPE_TUNNEL)
+    {
+        sai_object_id_t object_id;
+        sai_deserialize_object_id(serializedObjectId, object_id);
+        return createTunnel(object_id, switch_id, attr_count, attr_list);
+    }
+
     if (object_type == SAI_OBJECT_TYPE_MACSEC_PORT)
     {
         sai_object_id_t object_id;
@@ -2417,6 +2424,54 @@ sai_status_t SwitchStateBase::refresh_bridge_port_list(
     return SAI_STATUS_NOT_IMPLEMENTED;
 }
 
+std::vector<sai_object_id_t> SwitchStateBase::sort_bridge_port_list(
+        _In_ const std::map<sai_object_id_t, SwitchState::AttrHash>& bridge_ports) const
+{
+    SWSS_LOG_ENTER();
+
+    auto md_port_id = sai_metadata_get_attr_metadata(SAI_OBJECT_TYPE_BRIDGE_PORT, SAI_BRIDGE_PORT_ATTR_PORT_ID);
+
+    std::vector<sai_object_id_t> bridge_port_list;
+
+    std::set<sai_object_id_t> added;
+
+    for (const auto &p: m_port_list)
+    {
+        for (const auto &bp: bridge_ports)
+        {
+            auto it = bp.second.find(md_port_id->attridname);
+
+            if (it != bp.second.end() && it->second->getAttr()->value.oid == p)
+            {
+                bridge_port_list.push_back(bp.first);
+                added.insert(bp.first);
+            }
+        }
+    }
+
+    // then lag bridge ports; tunnel bridge ports are not listed (as on ASIC SAI implementations),
+    // since a listed one stays in the user's warm restart view next to the one it creates again
+
+    auto md_type = sai_metadata_get_attr_metadata(SAI_OBJECT_TYPE_BRIDGE_PORT, SAI_BRIDGE_PORT_ATTR_TYPE);
+
+    for (const auto &bp: bridge_ports)
+    {
+        auto it = bp.second.find(md_type->attridname);
+
+        if (it != bp.second.end() && it->second->getAttr()->value.s32 == SAI_BRIDGE_PORT_TYPE_TUNNEL)
+        {
+            continue;
+        }
+
+        if (added.find(bp.first) == added.end())
+        {
+            bridge_port_list.push_back(bp.first);
+        }
+    }
+
+    return bridge_port_list;
+}
+
 sai_status_t SwitchStateBase::refresh_vlan_member_list(
         _In_ const sai_attr_metadata_t *meta,
         _In_ sai_object_id_t vlan_id)
@@ -2980,7 +3035,11 @@ void SwitchStateBase::processFdbEntriesForAging()
         {
             FdbInfo fi = *it;
 
-            processFdbInfo(fi, SAI_FDB_EVENT_AGED);
+            // an entry the user removed or replaced is not aged out
+            if (isLearnedFdbEntryPresent(fi))
+            {
+                processFdbInfo(fi, SAI_FDB_EVENT_AGED);
+            }
 
             it = m_fdb_info_set.erase(it);
         }
