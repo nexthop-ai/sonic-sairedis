@@ -1,6 +1,7 @@
 #include "Meta.h"
 #include "MockMeta.h"
 #include "MetaTestSaiInterface.h"
+#include "sai_serialize.h"
 
 #include <arpa/inet.h>
 #include <net/ethernet.h>
@@ -1739,6 +1740,69 @@ TEST(Meta, populate)
     m.populate(dump);
 }
 
+<<<<<<< HEAD
+=======
+TEST(Meta, connect_to_existing_switch)
+{
+    Meta m(std::make_shared<MetaTestSaiInterface>());
+
+    sai_object_id_t switchId = 0;
+
+    sai_attribute_t attr;
+
+    attr.id = SAI_SWITCH_ATTR_INIT_SWITCH;
+    attr.value.booldata = false;
+
+    // connect first, populate after, as Sai::create does
+
+    EXPECT_EQ(SAI_STATUS_SUCCESS, m.create(SAI_OBJECT_TYPE_SWITCH, &switchId, SAI_NULL_OBJECT_ID, 1, &attr));
+
+    EXPECT_NE(SAI_NULL_OBJECT_ID, switchId);
+
+    auto strSwitchId = sai_serialize_object_id(switchId);
+
+    // a port of that switch: same switch index and context, object type port
+
+    sai_object_id_t portId = (switchId & ~((sai_object_id_t)0xff << 48)) | ((sai_object_id_t)SAI_OBJECT_TYPE_PORT << 48) | 0x2;
+
+    auto strPortId = sai_serialize_object_id(portId);
+
+    swss::TableDump dump;
+
+    dump["SAI_OBJECT_TYPE_SWITCH:" + strSwitchId]["SAI_SWITCH_ATTR_INIT_SWITCH"] = "true";
+    dump["SAI_OBJECT_TYPE_PORT:" + strPortId]["SAI_PORT_ATTR_HW_LANE_LIST"] = "2:300,301";
+    dump["SAI_OBJECT_TYPE_PORT:" + strPortId]["SAI_PORT_ATTR_SPEED"] = "50000";
+
+    m.populate(dump);
+
+    // the switch and the populated port are usable
+
+    attr.id = SAI_SWITCH_ATTR_SWITCHING_MODE;
+    attr.value.s32 = SAI_SWITCH_SWITCHING_MODE_CUT_THROUGH;
+
+    EXPECT_EQ(SAI_STATUS_SUCCESS, m.set(SAI_OBJECT_TYPE_SWITCH, switchId, &attr));
+
+    attr.id = SAI_PORT_ATTR_ADMIN_STATE;
+    attr.value.booldata = true;
+
+    EXPECT_EQ(SAI_STATUS_SUCCESS, m.set(SAI_OBJECT_TYPE_PORT, portId, &attr));
+}
+
+TEST(Meta, populate_acl_entry_udf_uint8_list)
+{
+    Meta m(std::make_shared<MetaTestSaiInterface>());
+
+    swss::TableDump dump;
+
+    dump["SAI_OBJECT_TYPE_ACL_TABLE:oid:0x7000000000700"]["SAI_ACL_TABLE_ATTR_FIELD_ACL_IP_TYPE"] = "true";
+    dump["SAI_OBJECT_TYPE_ACL_ENTRY:oid:0x8000000000701"]["SAI_ACL_ENTRY_ATTR_TABLE_ID"] = "oid:0x7000000000700";
+    dump["SAI_OBJECT_TYPE_ACL_ENTRY:oid:0x8000000000701"]["SAI_ACL_ENTRY_ATTR_USER_DEFINED_FIELD_GROUP_MIN"] =
+            "4:17,34,51,68&mask:4:0xff,0xff,0xff,0xff";
+
+    m.populate(dump);
+}
+
+>>>>>>> ca0078e0 (NOS-19569: [meta] Connect to an existing switch before its metadata is populated (#434))
 TEST(Meta, bulkGetClearStats)
 {
     Meta m(std::make_shared<MetaTestSaiInterface>());
