@@ -468,3 +468,10 @@ jitter
 jittered
 VPP
 ARGV
+CLI
+GETRESPONSE
+saiconfig
+HGETALL
+HMGET
+bvid
+LPUSH
