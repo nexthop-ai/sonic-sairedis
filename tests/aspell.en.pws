@@ -464,5 +464,9 @@ desync
 rebuildable
 jitter
 jittered
+diag
+poller
+PAI
+FFE
 VPP
 ARGV
