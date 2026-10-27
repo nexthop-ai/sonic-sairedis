@@ -479,3 +479,10 @@ pbh
 subtree
 iface
 loopback
+CLI
+GETRESPONSE
+saiconfig
+HGETALL
+HMGET
+bvid
+LPUSH
