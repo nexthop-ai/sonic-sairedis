@@ -1683,6 +1683,22 @@ public:
         return !m_objectIdsMap.empty() || !m_bulkContexts.empty();
     }
 
+    void getObjectVids(
+            _Out_ std::set<sai_object_id_t> &vids) const override
+    {
+        SWSS_LOG_ENTER();
+
+        for (const auto &kv : m_objectIdsMap)
+        {
+            vids.insert(kv.first);
+        }
+
+        for (const auto &kv : m_bulkContexts)
+        {
+            vids.insert(kv.second->object_vids.begin(), kv.second->object_vids.end());
+        }
+    }
+
 private:
     std::set<StatType> setupBaseCounterGroup(
             _In_ sai_object_id_t rid,
@@ -3820,6 +3836,17 @@ public:
         return !m_bulkMeterContexts.empty();
     }
 
+    void getObjectVids(
+            _Out_ std::set<sai_object_id_t> &vids) const override
+    {
+        SWSS_LOG_ENTER();
+
+        for (const auto &kv : m_bulkMeterContexts)
+        {
+            vids.insert(kv.first);
+        }
+    }
+
 private:
     struct BulkMeterStatsContext
     {
@@ -4285,6 +4312,22 @@ void FlexCounter::addCounterPlugin(
 
     // notify thread to start polling
     notifyPoll();
+}
+
+std::set<sai_object_id_t> FlexCounter::getCounterVids()
+{
+    MUTEX;
+
+    SWSS_LOG_ENTER();
+
+    std::set<sai_object_id_t> vids;
+
+    for (const auto &kv : m_counterContext)
+    {
+        kv.second->getObjectVids(vids);
+    }
+
+    return vids;
 }
 
 bool FlexCounter::isEmpty()
