@@ -21,6 +21,7 @@ Bool
 CHARDATA
 COLDVIDS
 CONST
+constexpr
 CRM
 CSIG
 CSP
@@ -45,8 +46,11 @@ FIXME
 FlexCounter
 gbsyncd
 GCM
+GETRESPONSE
 GRE
+gtest
 GUID
+HMGET
 HSV
 ICV
 IFF

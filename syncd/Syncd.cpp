@@ -3417,6 +3417,13 @@ sai_status_t Syncd::processBulkOidCreate(
         }
     }
 
+    // Every entry failing is a normal per-object result that must reach the caller,
+    // not a reason to touch ASIC_DB (an empty RID list would throw in Redis).
+    if (createdRids.empty())
+    {
+        return status;
+    }
+
     m_translator->insertRidsAndVids(createdRids.size(), createdRids.data(), createdVids.data());
 
     if (objectType == SAI_OBJECT_TYPE_PORT)

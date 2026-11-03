@@ -811,6 +811,12 @@ void RedisClient::getVidsForRids(
 {
     SWSS_LOG_ENTER();
 
+    // HMGET requires at least one field; Redis rejects the bare "HMGET key" form.
+    if (count == 0)
+    {
+        return;
+    }
+
     swss::RedisCommand hmget;
 
     std::vector<std::string> cmds;

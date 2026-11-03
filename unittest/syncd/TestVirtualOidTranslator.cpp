@@ -286,3 +286,38 @@ TEST(VirtualOidTranslator, translateRidsToVidsDisabledRedisClient)
 
     sai->apiUninitialize();
 }
+
+TEST(VirtualOidTranslator, translateRidsToVidsEmpty)
+{
+    /*
+     * A bulk port create where every entry fails reaches translateRidsToVids
+     * with no RIDs; it must be a no-op rather than an empty HMGET to ASIC_DB.
+     */
+    profileMap["SAI_VS_SWITCH_TYPE"] = "SAI_VS_SWITCH_TYPE_BCM56850";
+
+    auto dbAsic = std::make_shared<swss::DBConnector>("ASIC_DB", 0);
+    auto client = std::make_shared<RedisClient>(dbAsic);
+    auto sai = std::make_shared<saivs::Sai>();
+
+    ServiceMethodTable smt;
+    smt.profileGetValue = std::bind(&profileGetValue, _1, _2);
+    smt.profileGetNextValue = std::bind(&profileGetNextValue, _1, _2, _3);
+    sai_service_method_table_t test_services = smt.getServiceMethodTable();
+
+    sai_status_t status = sai->apiInitialize(0, &test_services);
+    EXPECT_EQ(status, SAI_STATUS_SUCCESS);
+
+    auto switchConfigContainer = std::make_shared<sairedis::SwitchConfigContainer>();
+    auto redisVidIndexGenerator = std::make_shared<sairedis::RedisVidIndexGenerator>(dbAsic, REDIS_KEY_VIDCOUNTER);
+    auto virtualObjectIdManager = std::make_shared<sairedis::VirtualObjectIdManager>(
+            0,
+            switchConfigContainer,
+            redisVidIndexGenerator);
+
+    VirtualOidTranslator vot(client, virtualObjectIdManager, sai);
+
+    EXPECT_NO_THROW(client->getVidsForRids(0, nullptr, nullptr));
+    EXPECT_NO_THROW(vot.translateRidsToVids(0x21000000000000ULL, 0, nullptr, nullptr));
+
+    sai->apiUninitialize();
+}

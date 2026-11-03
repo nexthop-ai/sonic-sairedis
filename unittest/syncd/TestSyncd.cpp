@@ -2,6 +2,7 @@
 #include "DisabledRedisClient.h"
 #include "RedisClient.h"
 #include "ZmqRedisClient.h"
+#include "DisabledRedisClient.h"
 #include "sai_serialize.h"
 #include "RequestShutdown.h"
 #include "vslib/ContextConfigContainer.h"
@@ -412,9 +413,27 @@ public:
     MOCK_METHOD(sai_object_id_t, getRidForVid, (sai_object_id_t vid), (override));
 };
 
+class PortCreateSpySaiSwitch : public MockSaiSwitch
+{
+public:
+    using MockSaiSwitch::MockSaiSwitch;
+
+    MOCK_METHOD(void, onPostPortsCreate, (size_t count, const sai_object_id_t *port_rids), (override));
+};
+
 class SyncdTest : public ::testing::Test
 {
 protected:
+    // The switch and port setUpSwitchWithOnePort() registers, a port VID it has no RID for, and
+    // the VID/RID pair of a port a mocked bulk create succeeds on.
+    static constexpr sai_object_id_t SWITCH_VID = 0x21000000000000;
+    static constexpr sai_object_id_t SWITCH_RID = 0x11000000000001;
+    static constexpr sai_object_id_t PORT_VID = 0x10000000000002;
+    static constexpr sai_object_id_t PORT_RID = 0x11000000000002;
+    static constexpr sai_object_id_t UNMAPPED_PORT_VID = 0x10000000000003;
+    static constexpr sai_object_id_t CREATED_PORT_VID = 0x10000000000004;
+    static constexpr sai_object_id_t CREATED_PORT_RID = 0x11000000000004;
+
     void SetUp() override
     {
         m_sai = std::make_shared<MockableSaiInterface>();
@@ -428,6 +447,217 @@ protected:
     void TearDown() override
     {
         clearDB();
+    }
+
+    // Registers a switch with one discovered port (lanes 52,53) plus the SAI mocks that port
+    // bulk tests need. The switch type lets a test spy on additional SaiSwitch hooks.
+    template <typename SwitchT = MockSaiSwitch>
+    std::shared_ptr<SwitchT> setUpSwitchWithOnePort()
+    {
+        SWSS_LOG_ENTER();
+
+        sai_object_id_t switchVid = SWITCH_VID;
+        sai_object_id_t switchRid = SWITCH_RID;
+
+        sai_object_id_t portVid = PORT_VID;
+        sai_object_id_t portRid = PORT_RID;
+
+        auto translator = m_syncd->m_translator;
+        translator->insertRidAndVid(switchRid, switchVid);
+        translator->insertRidAndVid(portRid, portVid);
+
+        std::vector<uint32_t> lanes = {52, 53};
+        m_syncd->m_client->setPortLanes(switchVid, portRid, lanes);
+
+        m_sai->mock_objectTypeQuery = [switchRid, portRid](sai_object_id_t oid) {
+            sai_object_type_t ot = SAI_OBJECT_TYPE_NULL;
+            if (oid == switchRid)
+                ot = SAI_OBJECT_TYPE_SWITCH;
+            else if (oid == portRid)
+                ot = SAI_OBJECT_TYPE_PORT;
+            else
+                ot = SAI_OBJECT_TYPE_QUEUE;
+            return ot;
+        };
+
+        m_sai->mock_switchIdQuery = [switchVid](sai_object_id_t oid) {
+            return switchVid;
+        };
+
+        m_sai->mock_get = [switchRid, portVid, portRid](sai_object_type_t objectType, sai_object_id_t objectId, uint32_t attrCount, sai_attribute_t* attrList) -> sai_status_t {
+            if (attrCount != 1) {
+                return SAI_STATUS_INVALID_PARAMETER;
+            }
+
+            if (attrList[0].id == SAI_SWITCH_ATTR_PORT_LIST) {
+                if (objectType == SAI_OBJECT_TYPE_SWITCH && objectId == switchRid) {
+                    attrList[0].value.objlist.count = 1;
+                    attrList[0].value.objlist.list[0] = portRid;
+                    return SAI_STATUS_SUCCESS;
+                }
+                return SAI_STATUS_INVALID_PARAMETER;
+            }
+
+            if (attrList[0].id == SAI_SWITCH_ATTR_PORT_NUMBER) {
+                attrList[0].value.u32 = 1;
+                return SAI_STATUS_SUCCESS;
+            }
+
+            if (objectType == SAI_OBJECT_TYPE_PORT) {
+                if (attrList[0].id == SAI_PORT_ATTR_HW_LANE_LIST) {
+                    if (objectId == portRid) {
+                        if (attrList[0].value.u32list.list != nullptr) {
+                            attrList[0].value.u32list.count = 2;
+                            static uint32_t hw_lanes[2] = {52, 53};
+                            memcpy(attrList[0].value.u32list.list, hw_lanes, sizeof(uint32_t) * 2);
+                        } else {
+                            return SAI_STATUS_BUFFER_OVERFLOW;
+                        }
+                    }
+                }
+
+                if (attrList[0].id == SAI_PORT_ATTR_PORT_SERDES_ID) {
+                    attrList[0].value.oid = SAI_NULL_OBJECT_ID;
+                    return SAI_STATUS_SUCCESS;
+                }
+
+                return SAI_STATUS_SUCCESS;
+            }
+
+            if (attrList[0].id == SAI_SWITCH_ATTR_SRC_MAC_ADDRESS) {
+                if (objectType == SAI_OBJECT_TYPE_SWITCH && objectId == switchRid) {
+                    static sai_mac_t mac = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+                    memcpy(attrList[0].value.mac, mac, sizeof(sai_mac_t));
+                    return SAI_STATUS_SUCCESS;
+                }
+                return SAI_STATUS_INVALID_PARAMETER;
+            }
+
+            return SAI_STATUS_NOT_SUPPORTED;
+        };
+
+        auto mockSwitch = std::make_shared<SwitchT>(switchVid, switchRid, m_syncd->m_client, translator, m_sai, false);
+        m_syncd->m_switches[switchVid] = mockSwitch;
+        EXPECT_CALL(*mockSwitch, postPortRemove(testing::_))
+            .WillRepeatedly(testing::Invoke([](sai_object_id_t rid) {
+            }));
+
+        EXPECT_CALL(*mockSwitch, removeExistingObjectReference(testing::_))
+            .WillRepeatedly(testing::Invoke([](sai_object_id_t rid) {
+            }));
+
+        EXPECT_CALL(*mockSwitch, eraseRidAndVid(testing::_, testing::_))
+            .WillRepeatedly(testing::Invoke([](sai_object_id_t rid, sai_object_id_t vid) {
+            }));
+
+        return mockSwitch;
+    }
+
+    // A channel that yields kco on the first pop and then reports empty.
+    static std::shared_ptr<MockSelectableChannel> makeOneShotChannel(const swss::KeyOpFieldsValuesTuple &kco)
+    {
+        SWSS_LOG_ENTER();
+
+        auto channel = std::make_shared<MockSelectableChannel>();
+        auto popCallCount = std::make_shared<int>(0);
+
+        EXPECT_CALL(*channel, empty())
+            .WillRepeatedly([popCallCount]() {
+                return *popCallCount > 0;
+            });
+        EXPECT_CALL(*channel, pop(testing::_, testing::_))
+            .Times(testing::AnyNumber())
+            .WillRepeatedly(testing::DoAll(
+                testing::SetArgReferee<0>(kco),
+                testing::Invoke([popCallCount](swss::KeyOpFieldsValuesTuple&, bool) {
+                    (*popCallCount)++;
+                })
+            ));
+
+        return channel;
+    }
+
+    // Rebuilds syncd in ZMQ sync mode; the constructor picks the Redis client from these options.
+    void recreateSyncdWithZmq(bool asyncRec)
+    {
+        SWSS_LOG_ENTER();
+
+        m_opt->m_redisCommunicationMode = SAI_REDIS_COMMUNICATION_MODE_ZMQ_SYNC;
+        m_opt->m_enableAsyncRec = asyncRec;
+        m_opt->m_contextConfig = "files/ctx_zmq_enabled.json";
+        m_syncd = std::make_shared<Syncd>(m_sai, m_opt, false);
+    }
+
+    // Sends a bulk port create for vids in sync mode and returns the GETRESPONSE syncd sends back:
+    // the aggregate status, then one status per entry. A throw here would put run() into
+    // shutdown-wait mode.
+    std::pair<std::string, std::vector<swss::FieldValueTuple>> processBulkPortCreate(
+            const std::vector<sai_object_id_t> &vids)
+    {
+        SWSS_LOG_ENTER();
+
+        std::vector<swss::FieldValueTuple> values;
+        for (auto vid: vids)
+        {
+            values.emplace_back(sai_serialize_object_id(vid), "SAI_PORT_ATTR_ADMIN_STATE=true");
+        }
+
+        auto channel = makeOneShotChannel(std::make_tuple(
+            "SAI_OBJECT_TYPE_PORT:bulk:" + std::to_string(vids.size()), std::string("bulkcreate"), values));
+
+        m_syncd->m_enableSyncMode = true;
+        m_syncd->m_selectableChannel = channel;
+
+        std::pair<std::string, std::vector<swss::FieldValueTuple>> response;
+        EXPECT_CALL(*channel, set(testing::_, testing::_, testing::_)).Times(testing::AnyNumber());
+        EXPECT_CALL(*channel, set(testing::_, testing::_, REDIS_ASIC_STATE_COMMAND_GETRESPONSE))
+            .WillOnce(testing::DoAll(testing::SaveArg<0>(&response.first), testing::SaveArg<1>(&response.second)));
+
+        EXPECT_NO_THROW(m_syncd->processEvent(*channel));
+
+        return response;
+    }
+
+    // The vendor rejects every entry of a one-port bulk create: syncd must answer with the
+    // statuses and skip the post-create bookkeeping, since an empty RID list reached Redis as a
+    // bare "HMGET RIDTOVID".
+    void expectAllEntriesFailBulkCreateIsAnswered()
+    {
+        SWSS_LOG_ENTER();
+
+        m_opt->m_enableSaiBulkSupport = true;
+
+        auto spySwitch = setUpSwitchWithOnePort<PortCreateSpySaiSwitch>();
+        EXPECT_CALL(*spySwitch, onPostPortsCreate(testing::_, testing::_)).Times(0);
+
+        uint32_t vendorCalls = 0;
+        m_sai->mock_bulkCreate = [&vendorCalls](
+            sai_object_type_t,
+            sai_object_id_t,
+            uint32_t object_count,
+            const uint32_t*,
+            const sai_attribute_t**,
+            sai_bulk_op_error_mode_t,
+            sai_object_id_t *object_id,
+            sai_status_t *object_statuses) -> sai_status_t {
+                vendorCalls++;
+                for (uint32_t idx = 0; idx < object_count; idx++)
+                {
+                    object_id[idx] = SAI_NULL_OBJECT_ID;
+                    object_statuses[idx] = SAI_STATUS_INSUFFICIENT_RESOURCES;
+                }
+                return SAI_STATUS_FAILURE;
+        };
+
+        auto response = processBulkPortCreate({UNMAPPED_PORT_VID});
+        EXPECT_EQ(vendorCalls, 1u);
+
+        EXPECT_EQ(response.first, sai_serialize_status(SAI_STATUS_FAILURE));
+        ASSERT_EQ(response.second.size(), 1u);
+        EXPECT_EQ(fvField(response.second[0]), sai_serialize_status(SAI_STATUS_INSUFFICIENT_RESOURCES));
+
+        sai_object_id_t rid = SAI_NULL_OBJECT_ID;
+        EXPECT_FALSE(m_syncd->m_translator->tryTranslateVidToRid(UNMAPPED_PORT_VID, rid));
     }
 
     std::shared_ptr<MockableSaiInterface> m_sai;
@@ -679,6 +909,15 @@ TEST_F(SyncdTest, FlexCounterRemoveFromAsicChannelDoesNotRequireVidToRidTranslat
                 value));
 }
 
+// C++14 still needs a definition for a static constexpr member that gtest binds by reference.
+constexpr sai_object_id_t SyncdTest::SWITCH_VID;
+constexpr sai_object_id_t SyncdTest::SWITCH_RID;
+constexpr sai_object_id_t SyncdTest::PORT_VID;
+constexpr sai_object_id_t SyncdTest::PORT_RID;
+constexpr sai_object_id_t SyncdTest::UNMAPPED_PORT_VID;
+constexpr sai_object_id_t SyncdTest::CREATED_PORT_VID;
+constexpr sai_object_id_t SyncdTest::CREATED_PORT_RID;
+
 TEST_F(SyncdTest, processNotifySyncd)
 {
     auto sai = std::make_shared<MockableSaiInterface>();
@@ -774,124 +1013,17 @@ TEST_F(SyncdTest, BulkCreateTest)
 {
     m_opt->m_enableSaiBulkSupport = true;
 
-    sai_object_id_t switchVid = 0x21000000000000;
-    sai_object_id_t switchRid = 0x11000000000001;
-
-    sai_object_id_t portVid = 0x10000000000002;
-    sai_object_id_t portRid = 0x11000000000002;
-
-    auto translator = m_syncd->m_translator;
-    translator->insertRidAndVid(switchRid, switchVid);
-    translator->insertRidAndVid(portRid, portVid);
-
-    std::vector<uint32_t> lanes = {52, 53};
-    m_syncd->m_client->setPortLanes(switchVid, portRid, lanes);
-
-    m_sai->mock_objectTypeQuery = [switchRid, portRid](sai_object_id_t oid) {
-        sai_object_type_t ot = SAI_OBJECT_TYPE_NULL;
-        if (oid == switchRid)
-            ot = SAI_OBJECT_TYPE_SWITCH;
-        else if (oid == portRid)
-            ot = SAI_OBJECT_TYPE_PORT;
-        else
-            ot = SAI_OBJECT_TYPE_QUEUE;
-        return ot;
-    };
-
-    m_sai->mock_switchIdQuery = [switchVid](sai_object_id_t oid) {
-        return switchVid;
-    };
-
-    m_sai->mock_get = [switchRid, portVid, portRid](sai_object_type_t objectType, sai_object_id_t objectId, uint32_t attrCount, sai_attribute_t* attrList) -> sai_status_t {
-        if (attrCount != 1) {
-            return SAI_STATUS_INVALID_PARAMETER;
-        }
-
-        if (attrList[0].id == SAI_SWITCH_ATTR_PORT_LIST) {
-            if (objectType == SAI_OBJECT_TYPE_SWITCH && objectId == switchRid) {
-                attrList[0].value.objlist.count = 1;
-                attrList[0].value.objlist.list[0] = portRid;
-                return SAI_STATUS_SUCCESS;
-            }
-            return SAI_STATUS_INVALID_PARAMETER;
-        }
-
-        if (attrList[0].id == SAI_SWITCH_ATTR_PORT_NUMBER) {
-            attrList[0].value.u32 = 1;
-            return SAI_STATUS_SUCCESS;
-        }
-
-        if (objectType == SAI_OBJECT_TYPE_PORT) {
-            if (attrList[0].id == SAI_PORT_ATTR_HW_LANE_LIST) {
-                if (objectId == portRid) {
-                    if (attrList[0].value.u32list.list != nullptr) {
-                        attrList[0].value.u32list.count = 2;
-                        static uint32_t hw_lanes[2] = {52, 53};
-                        memcpy(attrList[0].value.u32list.list, hw_lanes, sizeof(uint32_t) * 2);
-                    } else {
-                        return SAI_STATUS_BUFFER_OVERFLOW;
-                    }
-                }
-            }
-
-            if (attrList[0].id == SAI_PORT_ATTR_PORT_SERDES_ID) {
-                attrList[0].value.oid = SAI_NULL_OBJECT_ID;
-                return SAI_STATUS_SUCCESS;
-            }
-
-            return SAI_STATUS_SUCCESS;
-        }
-
-        if (attrList[0].id == SAI_SWITCH_ATTR_SRC_MAC_ADDRESS) {
-            if (objectType == SAI_OBJECT_TYPE_SWITCH && objectId == switchRid) {
-                static sai_mac_t mac = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
-                memcpy(attrList[0].value.mac, mac, sizeof(sai_mac_t));
-                return SAI_STATUS_SUCCESS;
-            }
-            return SAI_STATUS_INVALID_PARAMETER;
-        }
-
-        return SAI_STATUS_NOT_SUPPORTED;
-    };
-
-    // Create a mock switch and set expectations
-    auto mockSwitch = std::make_shared<MockSaiSwitch>(switchVid, switchRid, m_syncd->m_client, translator, m_sai, false);
-    m_syncd->m_switches[switchVid] = mockSwitch;
-    EXPECT_CALL(*mockSwitch, postPortRemove(testing::_))
-        .WillRepeatedly(testing::Invoke([](sai_object_id_t rid) {
-        }));
-
-    EXPECT_CALL(*mockSwitch, removeExistingObjectReference(testing::_))
-        .WillRepeatedly(testing::Invoke([](sai_object_id_t rid) {
-        }));
-
-    EXPECT_CALL(*mockSwitch, eraseRidAndVid(testing::_, testing::_))
-        .WillRepeatedly(testing::Invoke([](sai_object_id_t rid, sai_object_id_t vid) {
-        }));
+    setUpSwitchWithOnePort();
 
     swss::KeyOpFieldsValuesTuple kco;
     std::string key = "SAI_OBJECT_TYPE_PORT:bulk:1";
     std::string op = "bulkcreate";
     std::vector<swss::FieldValueTuple> values = {
-        {"oid:0x10000000000002", "SAI_PORT_ATTR_ADMIN_STATE=true"}
+        {sai_serialize_object_id(PORT_VID), "SAI_PORT_ATTR_ADMIN_STATE=true"}
     };
     kco = std::make_tuple(key, op, values);
 
-    auto channel = std::make_shared<MockSelectableChannel>();
-    int popCallCount = 0;
-
-    EXPECT_CALL(*channel, empty())
-        .WillRepeatedly([&popCallCount]() {
-            return popCallCount > 0; // Return true after the first pop call
-        });
-    EXPECT_CALL(*channel, pop(testing::_, testing::_))
-        .Times(testing::AnyNumber())
-        .WillRepeatedly(testing::DoAll(
-            testing::SetArgReferee<0>(kco),
-            testing::Invoke([&popCallCount](swss::KeyOpFieldsValuesTuple&, bool) {
-                popCallCount++;
-            })
-        ));
+    auto channel = makeOneShotChannel(kco);
 
     m_sai->mock_bulkCreate = [](
         sai_object_type_t,
@@ -1015,6 +1147,77 @@ TEST_F(SyncdTest, SwitchMacDefaultsVoq)
 TEST_F(SyncdTest, SwitchMacDefaultsRouterMacNotGettable)
 {
     switchMacDefaultsTest(m_sai, m_syncd, true, SAI_SWITCH_TYPE_VOQ, false);
+}
+
+TEST_F(SyncdTest, BulkCreateAllEntriesFailSkipsPostCreate)
+{
+    expectAllEntriesFailBulkCreateIsAnswered();
+}
+
+TEST_F(SyncdTest, BulkCreateAllEntriesFailWithZmqRedisClient)
+{
+    // Async recording uses ZmqRedisClient, which inherits RedisClient's HMGET path for RID to VID translation.
+    recreateSyncdWithZmq(true);
+    ASSERT_NE(std::dynamic_pointer_cast<ZmqRedisClient>(m_syncd->m_client), nullptr);
+
+    expectAllEntriesFailBulkCreateIsAnswered();
+}
+
+TEST_F(SyncdTest, BulkCreateAllEntriesFailWithDisabledRedisClient)
+{
+    // A ZMQ DPU switch keeps no ASIC_DB state; syncd reads switch_type only while constructing.
+    swss::DBConnector configDb("CONFIG_DB", 0);
+    swss::Table deviceMetadata(&configDb, "DEVICE_METADATA");
+    deviceMetadata.hset("localhost", "switch_type", "dpu");
+    recreateSyncdWithZmq(false);
+    deviceMetadata.del("localhost");
+    ASSERT_NE(std::dynamic_pointer_cast<DisabledRedisClient>(m_syncd->m_client), nullptr);
+
+    expectAllEntriesFailBulkCreateIsAnswered();
+}
+
+TEST_F(SyncdTest, BulkCreateMixedResultRunsPostCreateForCreatedPorts)
+{
+    // Only the entry the vendor created gets a RID/VID mapping and port post-create.
+    m_opt->m_enableSaiBulkSupport = true;
+
+    auto spySwitch = setUpSwitchWithOnePort<PortCreateSpySaiSwitch>();
+    std::vector<sai_object_id_t> postCreateRids;
+    EXPECT_CALL(*spySwitch, onPostPortsCreate(testing::_, testing::_))
+        .WillOnce(testing::Invoke([&postCreateRids](size_t count, const sai_object_id_t *port_rids) {
+            postCreateRids.assign(port_rids, port_rids + count);
+        }));
+
+    m_sai->mock_bulkCreate = [](
+        sai_object_type_t,
+        sai_object_id_t,
+        uint32_t object_count,
+        const uint32_t*,
+        const sai_attribute_t**,
+        sai_bulk_op_error_mode_t,
+        sai_object_id_t *object_id,
+        sai_status_t *object_statuses) -> sai_status_t {
+            EXPECT_EQ(object_count, 2u);
+            object_id[0] = CREATED_PORT_RID;
+            object_statuses[0] = SAI_STATUS_SUCCESS;
+            object_id[1] = SAI_NULL_OBJECT_ID;
+            object_statuses[1] = SAI_STATUS_INSUFFICIENT_RESOURCES;
+            return SAI_STATUS_FAILURE;
+    };
+
+    auto response = processBulkPortCreate({CREATED_PORT_VID, UNMAPPED_PORT_VID});
+
+    EXPECT_EQ(postCreateRids, std::vector<sai_object_id_t>{CREATED_PORT_RID});
+
+    EXPECT_EQ(response.first, sai_serialize_status(SAI_STATUS_FAILURE));
+    ASSERT_EQ(response.second.size(), 2u);
+    EXPECT_EQ(fvField(response.second[0]), sai_serialize_status(SAI_STATUS_SUCCESS));
+    EXPECT_EQ(fvField(response.second[1]), sai_serialize_status(SAI_STATUS_INSUFFICIENT_RESOURCES));
+
+    sai_object_id_t rid = SAI_NULL_OBJECT_ID;
+    ASSERT_TRUE(m_syncd->m_translator->tryTranslateVidToRid(CREATED_PORT_VID, rid));
+    EXPECT_EQ(rid, CREATED_PORT_RID);
+    EXPECT_FALSE(m_syncd->m_translator->tryTranslateVidToRid(UNMAPPED_PORT_VID, rid));
 }
 
 TEST_F(SyncdTest, BulkSetTest)
