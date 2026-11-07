@@ -16,6 +16,7 @@ tests_SOURCES = main.cpp \
                 MockHelper.cpp \
 				MockableSaiSwitchInterface.cpp \
 				TestBestCandidateFinder.cpp \
+				TestComparisonLogicValidOnly.cpp \
 				TestMySidWarmboot.cpp \
 				TestAttrVersionChecker.cpp \
 				TestCommandLineOptions.cpp \
