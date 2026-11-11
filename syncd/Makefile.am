@@ -30,6 +30,11 @@ libSyncd_a_SOURCES = \
 				FlowDump.cpp \
 				GlobalSwitchId.cpp \
 				HardReiniter.cpp \
+<<<<<<< HEAD
+=======
+				ImplicitDependency.cpp \
+				LinkDebounceManager.cpp \
+>>>>>>> 2dd20e58 (NOS-22764: [syncd] Create a P2P tunnel after the P2MP tunnel of its source IP (#482))
 				MdioIpcServer.cpp \
 				MetadataLogger.cpp \
 				NotificationHandler.cpp \

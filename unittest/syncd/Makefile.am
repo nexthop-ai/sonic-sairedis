@@ -9,6 +9,11 @@ tests_SOURCES = main.cpp \
                 MockHelper.cpp \
 				MockableSaiSwitchInterface.cpp \
 				TestBestCandidateFinder.cpp \
+<<<<<<< HEAD
+=======
+				TestComparisonLogicValidOnly.cpp \
+				TestImplicitDependency.cpp \
+>>>>>>> 2dd20e58 (NOS-22764: [syncd] Create a P2P tunnel after the P2MP tunnel of its source IP (#482))
 				TestMySidWarmboot.cpp \
 				TestAttrVersionChecker.cpp \
 				TestCommandLineOptions.cpp \
