@@ -495,3 +495,10 @@ cp
 ethertype
 fixup
 nexts
+CLI
+GETRESPONSE
+saiconfig
+HGETALL
+HMGET
+bvid
+LPUSH
