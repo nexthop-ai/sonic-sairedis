@@ -502,3 +502,10 @@ sFlow
 SVI
 VNIs
 decapsulate
+CLI
+GETRESPONSE
+saiconfig
+HGETALL
+HMGET
+bvid
+LPUSH
